@@ -570,6 +570,36 @@ tr:hover td { background: var(--surface-2); }
   from { opacity: 0; transform: translateY(-4px); }
   to   { opacity: 1; transform: translateY(0); }
 }
+/* ── Warning popup ── */
+.warning-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,.55);
+  display: flex; align-items: center; justify-content: center; z-index: 999;
+}
+.warning-modal {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 1.5rem; max-width: 360px; width: 90%;
+  box-shadow: var(--shadow);
+}
+.warning-title {
+  font-size: 1.1rem; font-weight: 700; color: var(--warn); margin-bottom: .75rem;
+}
+.warning-body p {
+  margin: 0 0 .5rem; color: var(--fg); font-size: .95rem; line-height: 1.5;
+}
+.warning-actions {
+  display: flex; gap: .75rem; justify-content: flex-end; margin-top: 1.25rem;
+}
+.warning-cancel {
+  padding: .45rem 1rem; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--surface-2);
+  color: var(--fg); cursor: pointer; font-size: .9rem;
+}
+.warning-confirm {
+  padding: .45rem 1rem; border-radius: var(--radius-sm);
+  border: none; background: var(--warn); color: #fff;
+  cursor: pointer; font-size: .9rem; font-weight: 600;
+}
+.warning-confirm:hover { opacity: .9; }
 </style>
 
 <!-- ═══════════════════════════════ APP ═══════════════════════════════ -->
@@ -1014,10 +1044,15 @@ async function refreshAll() {
 const ITEM_DEFS = [
   { key: 'Balsa 1mm',              type: 'consume', label: 'Balsa 1mm' },
   { key: 'Balsa 3mm',              type: 'consume', label: 'Balsa 3mm' },
+  { key: 'Epoxy',                  type: 'consume', label: 'Epoxy' },
   { key: 'Drill 6mm',              type: 'loan',    label: '6mm slangenboor (230mm)' },
-  { key: 'Drill 8mm',              type: 'loan',    label: '8mm slangenboor (230mm)' },
-  { key: 'Heatgun',               type: 'loan',    label: 'Heatgun' },
+  { key: 'Drill 8mm',              type: 'loan',    label: 'Drill 8mm' },
+  { key: 'Heatgun',                type: 'loan',    label: 'Heatgun',
+    warnings: { 'Hand Out': 'Be aware of consumed power and tripping a fuse.' } },
   { key: 'Oscillating multi-tool', type: 'loan',    label: 'Oscillating multi-tool' },
+  { key: 'Scale',                  type: 'loan',    label: 'Scale',
+    warnings: { 'Return': 'Make sure the 6V DC power supply is returned.' } },
+  { key: 'Pin_Hinge',              type: 'consume', label: 'Pin Hinge' },
 ];
 
 function renderItemsGrid() {
@@ -1236,6 +1271,25 @@ function checkSubmitReady() {
   btn.disabled = !currentTeam || !anyQty;
 }
 
+function showWarningPopup(warnings) {
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.className = 'warning-overlay';
+    overlay.innerHTML = `
+      <div class="warning-modal">
+        <div class="warning-title">⚠ Attention</div>
+        <div class="warning-body">${warnings.map(w => `<p>${w}</p>`).join('')}</div>
+        <div class="warning-actions">
+          <button class="warning-cancel">Cancel</button>
+          <button class="warning-confirm">Confirm & Submit</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    overlay.querySelector('.warning-confirm').onclick = () => { overlay.remove(); resolve(true); };
+    overlay.querySelector('.warning-cancel').onclick  = () => { overlay.remove(); resolve(false); };
+  });
+}
+
 async function submitTransaction() {
   if (!currentTeam) return;
   const btn = document.getElementById('submit-btn');
@@ -1253,6 +1307,23 @@ async function submitTransaction() {
   });
 
   if (!entries.length) { btn.disabled = false; btn.textContent = 'Submit'; return; }
+
+  // Check for item warnings before submitting
+  const warnings = [];
+  entries.forEach(entry => {
+    const def = ITEM_DEFS.find(d => d.key === entry.item);
+    if (def && def.warnings && def.warnings[action]) {
+      warnings.push(`⚠ ${def.label}: ${def.warnings[action]}`);
+    }
+  });
+  if (warnings.length) {
+    btn.disabled = false;
+    btn.textContent = 'Submit';
+    const confirmed = await showWarningPopup(warnings);
+    if (!confirmed) return;
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner"></span>Submitting…';
+  }
 
   try {
     // Send all entries in one flow call
